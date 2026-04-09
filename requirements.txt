@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy
+python-jose
+google-auth
+python-multipart
+razorpay
+email-validator
+psycopg2-binary
+
+
