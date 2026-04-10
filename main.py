@@ -319,14 +319,12 @@ class FacultySummaryOut(BaseModel):
 # ======================
 # TIMETABLE PARSER
 # ======================
-
 def parse_sections(raw_text: str) -> List[Section]:
-    # -------------------------
-    # Preprocess
-    # -------------------------
+    import re
+
     def clean(line: str) -> str:
         line = line.strip()
-        # Fix merged time ranges: 11:0012:00 → 11:00 12:00
+        # Fix merged times
         line = re.sub(r"(\d{2}:\d{2})(\d{2}:\d{2})", r"\1 \2", line)
         return line
 
@@ -334,26 +332,9 @@ def parse_sections(raw_text: str) -> List[Section]:
 
     sections: List[Section] = []
 
-    current_course: Optional[str] = None
+    current_course = None
     current_section = None
     time_slots = None
-
-    # -------------------------
-    # Heuristics
-    # -------------------------
-    def looks_like_course_name(line: str) -> bool:
-        if line.startswith(("UG -", "PG -")):
-            return False
-        if re.search(r"\d{2}:\d{2}", line):
-            return False
-        if any(x in line.lower() for x in ["date", "credits"]):
-            return False
-        if line.isupper() and "-" in line:
-            return False
-        return len(line.split()) >= 2
-
-    def looks_like_section(line: str) -> bool:
-        return line.startswith(("UG -", "PG -")) and "," in line and "-" in line
 
     TIME_RE = re.compile(r"(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})")
 
@@ -373,47 +354,55 @@ def parse_sections(raw_text: str) -> List[Section]:
         current_section = None
         time_slots = None
 
-    # -------------------------
-    # Main parse loop
-    # -------------------------
     i = 0
     while i < len(lines):
         line = lines[i]
 
-        # ---- Course name detection ----
-        if looks_like_course_name(line):
-            flush()
-            current_course = line
-            i += 1
-            continue
+        # =========================
+        # ✅ COURSE NAME (NEW LOGIC)
+        # =========================
+        if line.lower() == "course overview":
+            if i + 1 < len(lines):
+                flush()
+                current_course = lines[i + 1]
+                i += 2
+                continue
 
-        # ---- Section header ----
-        if looks_like_section(line):
+        # =========================
+        # ✅ SECTION HEADER (IMPROVED)
+        # =========================
+        if line.startswith(("UG -", "PG -")):
             flush()
 
             parts = [p.strip() for p in line.split(",")]
+
+            # Example: UG - 08, T2-N2, MECH - Sellakumar S
             section_code = parts[1] if len(parts) > 1 else parts[0]
 
-            # faculty = last "-" part
+            # Faculty = last "-" part
             faculty = line.split("-")[-1].strip()
 
             current_section = {
                 "code": section_code,
                 "faculty": faculty,
             }
+
             time_slots = {d: [] for d in DAYS}
             i += 1
             continue
 
-        # ---- Day + Time lines ----
+        # =========================
+        # ✅ TIME PARSING (ROBUST)
+        # =========================
         if current_section:
             for day in DAYS:
                 if line.startswith(day):
                     ranges = TIME_RE.findall(line)
 
-                    # Two 1-hour slots → ONE period
                     periods_seen = set()
+
                     for start, end in ranges:
+                        # Ignore weird times (like 20:54)
                         if (start, end) in PERIODS:
                             periods_seen.add(PERIODS[(start, end)])
 
@@ -426,8 +415,6 @@ def parse_sections(raw_text: str) -> List[Section]:
 
     flush()
     return sections
-
-
 
 
 
